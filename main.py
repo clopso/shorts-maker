@@ -1,7 +1,7 @@
 import os
 import random
 import subprocess
-from moviepy.editor import VideoFileClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, CompositeVideoClip, AudioFileClip, CompositeAudioClip
 from moviepy.video.fx.all import mirror_x
 
 height_global = 1920
@@ -23,7 +23,7 @@ def get_video_duration(video_path):
 def divide_video_into_clipes_duration(input_video, clip_duration=50):
     """Divides the input video into segments of a specific duration."""
     video_duration = get_video_duration(input_video)
-    clips = [(start, min(start + clip_duration, video_duration)) for start in range(645, int(video_duration), clip_duration - 5)]
+    clips = [(start, min(start + clip_duration, video_duration)) for start in range(646, int(video_duration), clip_duration - 5)]
     return clips
 
 def divide_video_into_clipes_rendered(input_video, temp_folder, start, end):
@@ -49,6 +49,22 @@ def pick_random_filler_video(random_videos, temp_folder, clip_duration):
     subprocess.run(cmd, shell=True)
     return random_video_output
 
+def add_background_music(video_path, music_path, temp_folder, volume=0.1):
+    background_music_video = f"{temp_folder}/temp_clip_with_music.mp4"
+    
+    video = VideoFileClip(video_path)
+    music = AudioFileClip(music_path).volumex(volume)
+    
+    max_start_time = max(0, music.duration - video.duration)
+    random_start_time = random.uniform(0, max_start_time)
+
+    music = music.subclip(random_start_time, random_start_time + video.duration)
+
+    mixed_audio = CompositeAudioClip([video.audio, music])
+    video = video.set_audio(mixed_audio)
+    video.write_videofile(background_music_video, codec="libx264", audio_codec="aac")
+    return background_music_video
+
 def create_short_videos(input_video, random_videos, output_folder, temp_folder, duration=30):
     """Creates short videos by combining segments from the input video and filler videos."""
     clips = divide_video_into_clipes_duration(input_video, duration)
@@ -56,27 +72,34 @@ def create_short_videos(input_video, random_videos, output_folder, temp_folder, 
     for i, (start, end) in enumerate(clips):
         try:
             # Extract the main video clip
+            print(f"Processing clip {i + 1} ({start}-{end}s)")
             clip_output = divide_video_into_clipes_rendered(input_video, temp_folder, start, end)
+            clip_output = add_background_music(clip_output, "files/background-lofi.mp3", temp_folder, 0.01)
 
+            
             # Select and extract a random segment from a filler video
             random_video_output = pick_random_filler_video(random_videos, temp_folder, duration)
 
             # # Combine the two video clips
-            random_video = VideoFileClip(random_video_output).resize(height_global//3).set_position(("center", "bottom"))
+            random_video = VideoFileClip(random_video_output).resize(height=height_global//3).set_position(("center", "bottom"))
+            
             clip = VideoFileClip(clip_output).resize(height=height_global - random_video.h).set_position(("center", "top"))
             clip = mirror_x(clip)
 
             final_clip = CompositeVideoClip([clip, random_video], size=(width_global, height_global))  # 9:16 resolution
+            
             output_path = f"{output_folder}/short_video_{i + 1}.mp4"
-            final_clip.write_videofile(output_path, fps=30, codec="libx264", threads=8)
+            final_clip.write_videofile(output_path, fps=30, codec="libx264", audio_codec="aac")
 
             # Clean up temporary files
             os.remove(clip_output)
             os.remove(random_video_output)
 
+
             print(f"Video saved to: {output_path}")
         except Exception as e:
             print(f"Error processing clip {i + 1}: {e}")
+            return
 
 # Example paths
 input_video = "files/familyGuy.mkv"
@@ -93,4 +116,4 @@ output_folder = "output"
 temp_folder = "temp"
 
 # Create short videos
-create_short_videos(input_video, random_videos, output_folder, temp_folder, 50)
+create_short_videos(input_video, random_videos, output_folder, temp_folder, 70)
