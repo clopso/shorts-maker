@@ -1,9 +1,11 @@
 import os
 import random
 import subprocess
+import argparse
 from datetime import datetime
 from moviepy.editor import VideoFileClip, CompositeVideoClip, AudioFileClip, CompositeAudioClip
 from moviepy.video.fx.all import mirror_x
+
 import logging
 
 # Configure logging
@@ -13,7 +15,7 @@ logger = logging.getLogger()
 # Constants for global settings
 height_global = 1920
 width_global = 1080
-start_time = 1300
+start_time = 568
 
 # Ensure temp and output folders exist
 os.makedirs("temp", exist_ok=True)
@@ -43,10 +45,28 @@ def divide_video_into_clips(input_video, clip_duration=50):
     clips = [(start, min(start + clip_duration, video_duration)) for start in range(start_time, int(video_duration), clip_duration - 5)]
     return clips
 
-def render_video_segment(input_video, temp_folder, start, end):
-    """Renders a specific portion of the input video."""
+def render_video_segment(input_video, temp_folder, start, end, speed_factor=1.0):
+    """Renders a specific portion of the input video with a speed change using FFmpeg."""
     clip_output = f"{temp_folder}/temp_clip.mp4"
-    cmd = f"ffmpeg -i {input_video} -ss {start} -to {end} -c:v libx264 -crf 27 -preset veryfast -c:a copy {clip_output} -y"
+    
+    # FFmpeg filters for video and audio speed adjustment
+    video_filter = f"setpts=PTS/{speed_factor}"
+    if 0.5 <= speed_factor <= 2.0:
+        audio_filter = f"atempo={speed_factor}"
+    else:
+        # Chain multiple atempo filters for factors outside [0.5, 2]
+        audio_filter = (
+            "atempo=2.0," * int(speed_factor // 2) + f"atempo={speed_factor % 2.0}" if speed_factor > 2 
+            else "atempo=0.5," * int(1 // speed_factor) + f"atempo={speed_factor * 2.0}"
+        )
+    
+    # FFmpeg command to adjust video and audio speed
+    cmd = (
+        f"ffmpeg -i {input_video} -ss {start} -to {end} "
+        f"-filter:v \"{video_filter}\" -filter:a \"{audio_filter}\" "
+        f"-c:v libx264 -crf 27 -preset veryfast -c:a aac {clip_output} -y"
+    )
+    
     subprocess.run(cmd, shell=True)
     return clip_output
 
@@ -78,7 +98,7 @@ def add_background_music(video_path, music_path, temp_folder, volume=0.1):
     video.write_videofile(background_music_video, codec="libx264", audio_codec="aac")
     return background_music_video
 
-def create_short_videos(input_video, random_videos, output_folder, temp_folder, duration=30):
+def create_short_videos(input_video, random_videos, output_folder, temp_folder, duration=30, speed_factor=1.0):
     """Creates short videos by combining segments from the input video and filler videos."""
     clips = divide_video_into_clips(input_video, duration)
 
@@ -87,8 +107,8 @@ def create_short_videos(input_video, random_videos, output_folder, temp_folder, 
             logger.info(f"Processing clip {i + 1} ({start}-{end}s)")
 
             # Extract the main video clip
-            clip_output = render_video_segment(input_video, temp_folder, start, end)
-            clip_output = add_background_music(clip_output, "files/background-lofi.mp3", temp_folder, 0.01)
+            clip_output = render_video_segment(input_video, temp_folder, start, end, speed_factor=speed_factor)
+            clip_output = add_background_music(clip_output, "files/background-lofi.mp3", temp_folder, 0.02)
 
             # Extract and resize a filler video
             random_video_output = pick_random_filler_video(random_videos, temp_folder, duration)
@@ -97,7 +117,7 @@ def create_short_videos(input_video, random_videos, output_folder, temp_folder, 
             # Prepare the main video clip
             clip = VideoFileClip(clip_output).resize(height=height_global - random_video.h).set_position(("center", "top"))
             clip = mirror_x(clip)
-
+            
             # Combine the clips
             final_clip = CompositeVideoClip([clip, random_video], size=(width_global, height_global))
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -112,28 +132,68 @@ def create_short_videos(input_video, random_videos, output_folder, temp_folder, 
         except Exception as e:
             logger.error(f"Error processing clip {i + 1}: {e}")
 
-# Ensure ffmpeg is installed
-check_ffmpeg()
+def main():
+    check_ffmpeg()
+    
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description="Process video clips and add watermark.")
+    parser.add_argument(
+        "-i", "--input", required=True, help="Path to the main input video file."
+    )
+    parser.add_argument(
+        "-r",
+        "--random_videos_folder",
+        required=True,
+        help="Path to the folder containing filler videos.",
+    )
+    parser.add_argument(
+        "-o", "--output_folder", default="output", help="Path to the output folder."
+    )
+    parser.add_argument(
+        "-t", "--temp_folder", default="temp", help="Path to the temporary folder."
+    )
+    parser.add_argument(
+        "-d", "--duration", type=int, default=30, help="Duration of each short video clip in seconds."
+    )
+    parser.add_argument(
+        "-s", "--speed_factor", type=float, default=1.0, help="Speed factor for the main video clip."
+    )
+    args = parser.parse_args()
 
-# Example paths
-input_video = "files/doiscarasBR.mkv"
-random_videos_folder = "files/fillers"
-random_videos = [
-    os.path.join(random_videos_folder, f)
-    for f in os.listdir(random_videos_folder)
-    if f.lower().endswith(('.mp4', '.mkv', '.avi'))
-]
+    # Ensure input file and folder exist
+    if not os.path.isfile(args.input):
+        print(f"Error: Input video '{args.input}' does not exist.")
+        return
 
-if not os.path.isfile(input_video):
-    logger.error(f"Input video '{input_video}' does not exist.")
-    exit(1)
+    if not os.path.isdir(args.random_videos_folder):
+        print(f"Error: Random videos folder '{args.random_videos_folder}' does not exist.")
+        return
 
-if not random_videos:
-    logger.error("No valid filler video files found in the folder.")
-    exit(1)
+    # Ensure temp and output folders exist
+    os.makedirs(args.temp_folder, exist_ok=True)
+    os.makedirs(args.output_folder, exist_ok=True)
 
-output_folder = "output"
-temp_folder = "temp"
+    # Get random videos
+    random_videos = [
+        os.path.join(args.random_videos_folder, f)
+        for f in os.listdir(args.random_videos_folder)
+        if f.lower().endswith((".mp4", ".mkv", ".avi"))
+    ]
 
-# Create short videos
-create_short_videos(input_video, random_videos, output_folder, temp_folder, 70)
+    if not random_videos:
+        print("Error: No valid filler videos found in the specified folder.")
+        return
+
+    # Call your video processing function
+    create_short_videos(
+        input_video=args.input,
+        random_videos=random_videos,
+        output_folder=args.output_folder,
+        temp_folder=args.temp_folder,
+        duration=args.duration,
+        speed_factor=args.speed_factor
+    )
+
+
+if __name__ == "__main__":
+    main()
