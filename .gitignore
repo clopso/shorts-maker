@@ -4,3 +4,6 @@
 /output
 /files
 /temp
+/.gradio
+/__pycache__
+*/__pycache__
