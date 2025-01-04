@@ -14,7 +14,7 @@ width_global = WIDTH_GLOBAL
 
 def create_short_videos(input_video, random_videos, start_seconds, output_folder, temp_folder, duration=30, speed_factor=1.0, max_clip_count=10, background_music="", background_volume=0.1):
     """Creates short videos by combining segments from the input video and filler videos."""
-    clips = divide_video_into_clips(input_video, start_seconds, duration, max_clip_count)
+    clips = divide_video_into_clips(input_video, start_seconds, duration, max_clip_count, speed_factor)
 
     for i, (start, end) in enumerate(clips):
         try:
@@ -24,8 +24,6 @@ def create_short_videos(input_video, random_videos, start_seconds, output_folder
             # Extract the main video clip
             clip_output = render_video_segment(input_video, temp_folder, start, end, speed_factor=speed_factor)
             clip_output = add_background_music(clip_output, background_music, temp_folder, background_volume)
-
-            print(clip_output)
 
             # Extract and resize a filler video
             random_video_output = pick_random_filler_video(random_videos, temp_folder, duration)

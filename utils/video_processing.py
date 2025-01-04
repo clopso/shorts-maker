@@ -2,14 +2,21 @@ import os
 import random
 from .ffmpeg_utils import get_video_duration
 
-def divide_video_into_clips(input_video, start_time, clip_duration, max_clip_count):
+def divide_video_into_clips(input_video, start_time, clip_duration, max_clip_count, speed_factor):
     """Divides the input video into segments of a specific duration."""
     video_duration = get_video_duration(input_video)
     if video_duration < start_time:
         raise ValueError(f"Start time ({start_time}s) is greater than the video duration ({video_duration}s).")
-    clips = [(start, min(start + clip_duration, video_duration)) for start in range(start_time, int(video_duration), clip_duration - 5)]
-    if len(clips) > max_clip_count:
-        clips = random.sample(clips, max_clip_count)
+    
+    adjusted_start_time = start_time // speed_factor 
+        
+    clips = []
+    current_time = adjusted_start_time
+    while current_time < video_duration and len(clips) < max_clip_count:
+        end_time = min(current_time + clip_duration, video_duration)
+        clips.append((current_time, end_time))
+        current_time = end_time - 5  # Overlapping clips by 5 seconds
+    
     return clips
 
 def render_video_segment(input_video, temp_folder, start, end, speed_factor):
